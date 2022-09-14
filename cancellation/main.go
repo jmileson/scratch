@@ -24,10 +24,15 @@ type finalizeFunc func(context.Context, chan<- string, chan<- error)
 
 func simulateWork(ctx context.Context, name string, delay int, doneFuncs chan<- string, errors chan<- error) {
 	fmt.Printf("simulating work in %s\n", name)
-	time.Sleep(time.Duration(delay) * time.Millisecond)
+	select {
+	case <-ctx.Done():
+		return
+	case <-time.After(time.Duration(delay) * time.Millisecond):
+		// This branch simulates the "work" finishing before the context is cancelled
+	}
 
+	// simulate some kind of error occurring during finalization
 	if delay > 2000 {
-		fmt.Printf("%s is raising an error!\n", name)
 		select {
 		case <-ctx.Done():
 			// NOTE: don't try to send here, if the context is done,
@@ -47,22 +52,29 @@ func simulateWork(ctx context.Context, name string, delay int, doneFuncs chan<- 
 	}
 }
 
+// finalizeFast completes quickly and doesn't return an error
 func finalizeFast(ctx context.Context, doneFuncs chan<- string, errors chan<- error) {
 	simulateWork(ctx, "finalizeFast", 1, doneFuncs, errors)
 }
 
+// finalizeSlow completes slowly, but doesn't return an error
 func finalizeSlow(ctx context.Context, doneFuncs chan<- string, errors chan<- error) {
 	simulateWork(ctx, "finalizeSlow", 1000, doneFuncs, errors)
 }
 
+// finalizeError completes slowly, and returns an error
 func finalizeError(ctx context.Context, doneFuncs chan<- string, errors chan<- error) {
 	simulateWork(ctx, "finalizeError", 5000, doneFuncs, errors)
 }
 
+// finalizeNever doesn't complete before the timeout, and would return an error if it could
+// complete (but again, it can't because time).
 func finalizeNever(ctx context.Context, doneFuncs chan<- string, errors chan<- error) {
 	simulateWork(ctx, "finalizeError", 10*10*10*10*10, doneFuncs, errors)
 }
 
+// handleSig is responsible for handling signals sent from the OS and managing
+// the running of finalization functions.
 func handleSig(ctx context.Context, sig <-chan os.Signal, done chan<- bool, doneFuncs chan<- string, errors chan<- error) {
 	// block until we receive a signal
 	s := <-sig
@@ -96,6 +108,7 @@ func handleSig(ctx context.Context, sig <-chan os.Signal, done chan<- bool, done
 	close(done)
 }
 
+// checkErrors prints any errors sent to the channel.
 func checkErrors(errors <-chan error) {
 	// NOTE: we know in our example code that errors is closed
 	// after all the finalizers run, so the for loop is safe here.
@@ -106,6 +119,7 @@ func checkErrors(errors <-chan error) {
 	}
 }
 
+// checkCompleted prints any completed finalizer functions sent to the channel.
 func checkCompleted(doneFuncs <-chan string) {
 	// NOTE: ditto about this for loop!
 	for name := range doneFuncs {
@@ -113,6 +127,7 @@ func checkCompleted(doneFuncs <-chan string) {
 	}
 }
 
+// setupSignalHandling creates the necessary channels and registers signals to be handled.
 func setupSignalHandling(ctx context.Context) (chan bool, chan string, chan error) {
 	// handle CTRL+C interrupts
 	sig := make(chan os.Signal, 1)
