@@ -35,8 +35,6 @@ func simulateWork(ctx context.Context, name string, delay int, doneFuncs chan<- 
 	if delay > 2000 {
 		select {
 		case <-ctx.Done():
-			// NOTE: don't try to send here, if the context is done,
-			// then we closed the channel elsewhere and send would just panic
 			return
 		default:
 			errors <- errFinalize
@@ -73,6 +71,21 @@ func finalizeNever(ctx context.Context, doneFuncs chan<- string, errors chan<- e
 	simulateWork(ctx, "finalizeError", 10*10*10*10*10, doneFuncs, errors)
 }
 
+func waitTimeout(wg *sync.WaitGroup, timeout time.Duration) bool {
+	done := make(chan bool)
+	go func() {
+		defer close(done)
+		wg.Wait()
+	}()
+	select {
+	case <-done:
+		// wg completed normally
+		return false
+	case <-time.After(timeout):
+		return true
+	}
+}
+
 // handleSig is responsible for handling signals sent from the OS and managing
 // the running of finalization functions.
 func handleSig(ctx context.Context, sig <-chan os.Signal, done chan<- bool, doneFuncs chan<- string, errors chan<- error) {
@@ -89,19 +102,17 @@ func handleSig(ctx context.Context, sig <-chan os.Signal, done chan<- bool, done
 			f(ctx, doneFuncs, errors)
 		}()
 	}
-
-	wg.Wait()
+	t, ok := ctx.Deadline()
+	if !ok {
+		// just choose something, this should never happen
+		t = time.Now().Add(5 * time.Second)
+	}
+	timeout := time.Until(t)
+	waitTimeout(&wg, timeout)
 
 	// close the channel to indicate that we won't send any more
-	select {
-	case <-ctx.Done():
-		// don't try to close these channels if the context is done, because we close
-		// them elsewhere.
-		break
-	default:
-		close(errors)
-		close(doneFuncs)
-	}
+	close(errors)
+	close(doneFuncs)
 
 	// notify that we're done
 	done <- true
@@ -110,20 +121,25 @@ func handleSig(ctx context.Context, sig <-chan os.Signal, done chan<- bool, done
 
 // checkErrors prints any errors sent to the channel.
 func checkErrors(errors <-chan error) {
-	// NOTE: we know in our example code that errors is closed
-	// after all the finalizers run, so the for loop is safe here.
-	// if errors is not closed though, this will loop indefinitely
-	// so be careful with this construct.
 	for err := range errors {
+		// since we can't guarantee it closed, we check for zero values and treat them
+		// like they're closed
+		if err == nil {
+			return
+		}
 		fmt.Printf("    you an error: %s\n", err.Error())
+
 	}
 }
 
 // checkCompleted prints any completed finalizer functions sent to the channel.
 func checkCompleted(doneFuncs <-chan string) {
-	// NOTE: ditto about this for loop!
 	for name := range doneFuncs {
+		if name == "" {
+			return
+		}
 		fmt.Printf("    %s completed\n", name)
+
 	}
 }
 
@@ -166,8 +182,8 @@ func main() {
 			// we reached our timeout and graceful shutdown isn't an option.
 			// So we should check and report which finalizers finished and
 			// which didn't, and what errors we got for finished ones.
-			close(doneFuncs)
-			close(errors)
+			// close(doneFuncs)
+			// close(errors)
 			fmt.Println("oh no, we timed out :(")
 			fmt.Println("let's check for completed finalizers:")
 			checkCompleted(doneFuncs)
