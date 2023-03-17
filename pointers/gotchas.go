@@ -88,7 +88,7 @@ func LoopWithStruct(vals []Obj) {
 // implicit copy.
 func LoopWithStructFixed(vals []Obj) {
 	// A similar problem arises when you try to modify values in place
-	for i, _ := range vals {
+	for i := range vals {
 		vals[i].value += 1
 	}
 
