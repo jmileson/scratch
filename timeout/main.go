@@ -9,12 +9,23 @@ var (
 	errTimeout = errors.New("timeout")
 )
 
-func work() (bool, error) {
-	// TODO: support a failure case without a timeout, i.e. return false, nil
+func simulateWork(timeout time.Duration, ch chan<- bool) {
+	time.Sleep(100 * time.Millisecond)
+
+	ch <- (timeout % 2) == 0
+}
+
+func work(timeout time.Duration) (bool, error) {
 	// TODO: support timeout on this function
 
 	// simulates work being done
-	time.Sleep(100 * time.Millisecond)
+	ch := make(chan bool, 1)
+	go simulateWork(timeout, ch)
 
-	return true, nil
+	select {
+	case <-time.After(timeout):
+		return false, errTimeout
+	case ok := <-ch:
+		return ok, nil
+	}
 }

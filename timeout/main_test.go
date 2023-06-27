@@ -2,6 +2,7 @@ package main
 
 import (
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 )
@@ -9,7 +10,7 @@ import (
 func TestWorkSucceeds(t *testing.T) {
 	assert := assert.New(t)
 
-	ok, err := work()
+	ok, err := work(1 * time.Second)
 
 	assert.True(ok)
 	assert.NoError(err)
@@ -19,7 +20,7 @@ func TestWorkSucceeds(t *testing.T) {
 func TestWorkFailsNormally(t *testing.T) {
 	assert := assert.New(t)
 
-	ok, err := work()
+	ok, err := work(1*time.Second + 1)
 
 	assert.False(ok)
 	assert.NoError(err)
@@ -30,7 +31,7 @@ func TestWorkFailsNormally(t *testing.T) {
 func TestWorkFailsWithTimeout(t *testing.T) {
 	assert := assert.New(t)
 
-	ok, err := work()
+	ok, err := work(1 * time.Nanosecond)
 
 	assert.False(ok)
 	assert.ErrorIs(err, errTimeout)
